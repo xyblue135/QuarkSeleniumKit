@@ -212,7 +212,7 @@ if($XStartPct -ge $XEndPct){throw "XStartPct 必须小于 XEndPct"}
 if($YStartPct -ge $YEndPct){throw "YStartPct 必须小于 YEndPct"}
 
 $selected = Select-Window -Title $WindowTitle
-# 截屏脚本在 scripts/ 内，上级目录才是项目根，图片统一写到 项目根/images
+# 截屏脚本在 powershell/ 内，上级目录才是项目根，图片统一写到 项目根/images
 $imagesDir = Join-Path $PSScriptRoot ".." "images"
 if (-not (Test-Path -LiteralPath $imagesDir)) {
     New-Item -ItemType Directory -Path $imagesDir | Out-Null

@@ -12,5 +12,5 @@ echo.
 echo   重要：必须和「手动搜题.bat」或「2-开始自动搜题.bat」
 echo         同时开着，截屏与搜题两个窗口一起跑才顺畅。
 echo ==========================================================
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\定时截屏.ps1" -WindowTitle "雷电模拟器" -OutputName "雷电模拟器" -IntervalSeconds 5
+powershell -NoProfile -ExecutionPolicy Bypass -File "powershell\定时截屏.ps1" -WindowTitle "雷电模拟器" -OutputName "雷电模拟器" -IntervalSeconds 5
 endlocal
