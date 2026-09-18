@@ -1,0 +1,3 @@
+# 夸克自动搜题 - Python 依赖
+# selenium 4.6+ 自带 Selenium Manager，可自动匹配/下载与 Chrome 主版本一致的 chromedriver。
+selenium>=4.6

@@ -1,0 +1,34 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ---- 运行时产物（不入库）----
+# 截图：截屏脚本实时写入 images/，按天日志写入 logs/
+images/*.png
+images/*.jpg
+images/*.jpeg
+logs/*.log
+
+# Chrome 登录态档案（含个人登录信息，切勿入库）
+chrome-profile/
+
+# 手动放置的 chromedriver（二进制，且与本机 Chrome 版本绑定，不入库）
+drivers/
+
+# 用户本地覆盖配置（可能含个人路径，不入库）
+config.json
+
+# ---- 编辑器 / 系统 ----
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# ---- 保留空目录的占位文件本身不被忽略 ----
+!images/.gitkeep
+!logs/.gitkeep

@@ -1,0 +1,2 @@
+# 运行日志按天写入本目录（YYYY-MM-DD.log），已被 .gitignore 忽略。
+# 本文件仅用于让空目录进入 git。
