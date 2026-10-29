@@ -6,19 +6,26 @@
 教程写死了 chromedriver 149，而本机 Chrome 已经升级到 151，
 主版本不匹配会直接启动失败。
 
-这里改成三级策略：
+这里改成四级策略：
   1. config 里显式指定的 chromedriver 路径
   2. 本地扫描主版本号匹配的驱动（离线优先，避免 Selenium Manager 联网卡死）
-  3. Selenium Manager 自动匹配/下载驱动（兜底，需要联网）
+  3. Selenium Manager 自动匹配/下载驱动（官方途径，需要联网）
+  4. npmmirror 镜像下载（国内兜底，Selenium Manager 的下载源常连不上）
 
 只要 Chrome 自动升级，第 2 条会优先用本机已缓存的匹配驱动；
-只有本地找不到同主版本驱动时，才回退到第 3 条联网下载。
+本地找不到时走第 3 条；而 Selenium Manager 拿不到匹配驱动时
+（典型症状：缓存里只有旧版本、官方下载源 storage.googleapis.com 连不上，
+于是它拿旧驱动凑数或直接失败），第 4 条从国内镜像拉匹配版本，
+解压到项目 drivers/ 目录，之后第 2 条就能离线命中它。
 """
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from selenium import webdriver
@@ -40,6 +47,18 @@ CHROME_EXE_CANDIDATES = [
     Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
     Path.home() / r"AppData\Local\Google\Chrome\Application\chrome.exe",
 ]
+
+# ---------------------------------------------------------------- 镜像兜底
+
+# npmmirror（淘宝）镜像的 chrome-for-testing 二进制仓库，国内可直连。
+# 列表接口返回 {"data": [{"name": "156.0.8078.73/", ...}, ...]}
+MIRROR_LIST_URL = "https://registry.npmmirror.com/-/binary/chrome-for-testing/"
+MIRROR_DOWNLOAD_URL = (
+    "https://registry.npmmirror.com/-/binary/chrome-for-testing/"
+    "{version}/win64/chromedriver-win64.zip"
+)
+# 镜像下载的驱动解压到项目 drivers/ 目录（已被 .gitignore 忽略）
+MIRROR_INSTALL_DIR = Path(__file__).resolve().parent.parent / "drivers"
 
 
 # ---------------------------------------------------------------- 版本探测
@@ -88,6 +107,88 @@ def major_of(version: str | None) -> str | None:
     if not version:
         return None
     return version.split(".", 1)[0]
+
+
+# ---------------------------------------------------------------- 镜像下载
+
+def _urlopen_maybe_direct(url: str, timeout: float):
+    """
+    先按系统代理请求，失败后再试直连。
+    镜像在国内可直连：代理软件没开/半死不活时不应该挡住下载。
+    """
+    try:
+        return urllib.request.urlopen(url, timeout=timeout)
+    except Exception:  # noqa: BLE001
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return opener.open(url, timeout=timeout)
+
+
+def pick_mirror_version(major: str, timeout: float = 20.0) -> str | None:
+    """从镜像版本列表里挑出该 Chrome 主版本下最新的一个 CfT 版本号。"""
+    try:
+        with _urlopen_maybe_direct(MIRROR_LIST_URL, timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[驱动] 镜像版本列表拉取失败：{exc}")
+        return None
+
+    items = data if isinstance(data, list) else data.get("data", [])
+    candidates: list[tuple[int, ...]] = []
+    for item in items:
+        name = str(item.get("name", "")).strip("/")
+        if not name.startswith(f"{major}."):
+            continue
+        try:
+            candidates.append(tuple(int(part) for part in name.split(".")))
+        except ValueError:
+            continue
+    if not candidates:
+        return None
+    return ".".join(str(part) for part in max(candidates))
+
+
+def download_driver_from_mirror(version: str, timeout: float = 300.0) -> Path | None:
+    """从镜像下载 chromedriver-win64 并解压到项目 drivers/ 目录。"""
+    url = MIRROR_DOWNLOAD_URL.format(version=version)
+    target_dir = MIRROR_INSTALL_DIR / f"chromedriver-{version}"
+    target = target_dir / "chromedriver.exe"
+    if target.exists():
+        return target
+
+    zip_path = MIRROR_INSTALL_DIR / f"chromedriver-{version}-win64.zip"
+    MIRROR_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"[驱动] 正在从镜像下载 chromedriver {version} ...")
+    try:
+        with _urlopen_maybe_direct(url, timeout) as resp:
+            with zip_path.open("wb") as fp:
+                while True:
+                    chunk = resp.read(1 << 16)
+                    if not chunk:
+                        break
+                    fp.write(chunk)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[驱动] 镜像下载失败：{exc}")
+        zip_path.unlink(missing_ok=True)
+        return None
+
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            member = next(
+                name for name in zf.namelist() if name.endswith("/chromedriver.exe")
+            )
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(zf.read(member))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[驱动] 解压失败：{exc}")
+        zip_path.unlink(missing_ok=True)
+        return None
+    zip_path.unlink(missing_ok=True)
+
+    if major_of(detect_driver_version(target)) != major_of(version):
+        print("[驱动] 下载的驱动版本校验不通过，已丢弃。")
+        target.unlink(missing_ok=True)
+        return None
+    return target
 
 
 # ---------------------------------------------------------------- 驱动解析
@@ -155,11 +256,26 @@ def resolve_chromedriver(verbose: bool = True) -> tuple[Path | None, str]:
         ver = detect_driver_version(local)
         return local, f"本地匹配 {ver or '未知版本'}：{local}"
 
-    # 3) Selenium Manager 兜底（联网下载/匹配）
+    # 3) Selenium Manager 兜底（官方途径，联网下载/匹配）
     auto = resolve_via_selenium_manager()
     if auto:
         ver = detect_driver_version(auto)
-        return auto, f"自动匹配 {ver or '未知版本'}：{auto}"
+        if want_major and major_of(ver) != want_major:
+            # 典型场景：官方下载源连不上，SM 拿缓存里的旧驱动凑数，不能直接用
+            print(
+                f"[驱动] Selenium Manager 给出的 {ver} 与 Chrome {chrome_version} "
+                "主版本不符，改走镜像下载。"
+            )
+        else:
+            return auto, f"自动匹配 {ver or '未知版本'}：{auto}"
+
+    # 4) npmmirror 镜像下载（Selenium Manager 的官方下载源在国内常被墙）
+    if want_major:
+        mirror_version = pick_mirror_version(want_major)
+        if mirror_version:
+            installed = download_driver_from_mirror(mirror_version)
+            if installed:
+                return installed, f"镜像下载 {mirror_version}：{installed}"
 
     return None, "未找到可用驱动，交由 Selenium 内部处理"
 
