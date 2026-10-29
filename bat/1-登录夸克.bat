@@ -8,9 +8,24 @@ cd /d "%~dp0\.."
 :: set "PYEXE=C:\Python312\python.exe"
 set "PYEXE=python"
 
+"%PYEXE%" --version >nul 2>nul
+if errorlevel 1 (
+    echo.
+    echo [错误] 没找到 Python 命令。
+    echo        请安装 Python 3.9+，或者把本文件里的 set "PYEXE=python"
+    echo        改成 python.exe 的完整路径，例如：
+    echo        set "PYEXE=D:\Python312\python.exe"
+    echo.
+    pause
+    exit /b 1
+)
+
 echo 正在打开夸克登录页面...
-"%PYEXE%" src\登录.py
+echo （在弹出的 Chrome 里登录夸克，登录完直接关掉这个 Chrome 窗口）
+"%PYEXE%" src\登录.py %*
+set "RC=%ERRORLEVEL%"
 
 echo.
+if not "%RC%"=="0" echo [退出码 %RC%] 登录程序异常结束，请看上面的报错。
 pause
 endlocal

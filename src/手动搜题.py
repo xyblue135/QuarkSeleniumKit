@@ -19,6 +19,7 @@
   python 手动搜题.py --once       只搜一题就退出
   python 手动搜题.py --close      退出时直接关闭浏览器窗口（默认保留）
   python 手动搜题.py --no-log-file 不写日志文件，仅控制台输出
+  python 手动搜题.py --force      忽略 8 秒最小间隔（不推荐，容易触发风控）
 """
 
 from __future__ import annotations
@@ -27,10 +28,16 @@ import 控制台编码  # noqa: F401  统一控制台编码，必须最先导入
 
 import argparse
 import sys
+import time
 
 from 配置 import CONFIG
 from 日志 import Logger
 from 自动搜题 import AutoSearcher
+
+# 防封：两次手动搜题之间的最小间隔（秒）。
+# 手动模式每次回车都是 force=True，连按回车会连续上传同一题，最容易触发风控，
+# 所以这里硬性拦一道。真需要连搜，加 --force 参数自行承担风险。
+MIN_GAP_SECONDS = 8.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,10 +57,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="不写日志文件，仅控制台输出",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=f"忽略两次搜题之间的 {MIN_GAP_SECONDS:.0f} 秒最小间隔（不推荐，容易触发风控）",
+    )
     return parser.parse_args()
 
 
-def interactive_loop(searcher: AutoSearcher, log: Logger) -> None:
+def interactive_loop(searcher: AutoSearcher, log: Logger, ignore_gap: bool = False) -> None:
     """交互循环：回车搜下一题，q 退出。浏览器在循环期间保持打开。"""
     log.plain("")
     log.plain("已进入手动模式（CLI）：")
@@ -61,8 +73,11 @@ def interactive_loop(searcher: AutoSearcher, log: Logger) -> None:
     log.plain("  · 输入任意文字+回车   → 同样触发搜索下一题")
     log.plain("  · 输入 q / quit / exit → 退出（浏览器默认保留）")
     log.plain("（浏览器窗口会一直开着，方便你逐题查看识别结果；换题前请先让截屏程序截下新画面）")
+    if not ignore_gap:
+        log.plain(f"（防风控：两题之间至少间隔 {MIN_GAP_SECONDS:.0f} 秒，连按回车会被拦下）")
     log.plain("-" * 58)
     count = 0
+    last_upload_at = 0.0
     while True:
         try:
             cmd = input(">>> 回车搜题 / q 退出: ").strip().lower()
@@ -73,9 +88,19 @@ def interactive_loop(searcher: AutoSearcher, log: Logger) -> None:
         if cmd in ("q", "quit", "exit"):
             log.info("已退出手动模式")
             break
+        # 频率闸门：手动模式下每按一次回车都是一次真实上传，必须限速
+        if not ignore_gap:
+            elapsed = time.monotonic() - last_upload_at
+            if last_upload_at and elapsed < MIN_GAP_SECONDS:
+                log.warn(
+                    f"太快了：距上次搜题才 {elapsed:.0f} 秒，"
+                    f"请再等 {MIN_GAP_SECONDS - elapsed:.0f} 秒（连点容易被风控）"
+                )
+                continue
         # 空回车或任意其它输入都视为“搜下一题”
         try:
             searcher.do_upload(force=True, tag="手动")
+            last_upload_at = time.monotonic()
             count += 1
         except KeyboardInterrupt:
             log.plain("")
@@ -83,6 +108,7 @@ def interactive_loop(searcher: AutoSearcher, log: Logger) -> None:
             continue
         except Exception as exc:  # noqa: BLE001
             log.error(f"搜题出错：{exc}")
+            last_upload_at = time.monotonic()
     log.plain(f"本次手动共搜 {count} 题")
 
 
@@ -109,7 +135,7 @@ def main() -> int:
         if args.once:
             searcher.do_upload(force=True, tag="手动")
         else:
-            interactive_loop(searcher, log)
+            interactive_loop(searcher, log, ignore_gap=args.force)
     except KeyboardInterrupt:
         log.plain("")
         log.info("已被 Ctrl+C 中断")

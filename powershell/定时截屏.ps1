@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$WindowTitle = "",
     [int]$IntervalSeconds = 1,
     [switch]$TopMost,
@@ -195,7 +195,10 @@ function Capture-Window {
         $cropBmp = New-Object System.Drawing.Bitmap $srcW, $srcH
         $gCrop = [System.Drawing.Graphics]::FromImage($cropBmp)
         try{
-            $gCrop.DrawImage($fullBmp, 0,0,$srcX,$srcY,$srcW,$srcH,[System.Drawing.GraphicsUnit]::Pixel)
+            # 兼容 Windows PowerShell 5.1(.NET Framework)：只能用 Rectangle 重载，没有 8 参数版本
+            $destRect = New-Object System.Drawing.Rectangle 0, 0, $srcW, $srcH
+            $srcRect = New-Object System.Drawing.Rectangle $srcX, $srcY, $srcW, $srcH
+            $gCrop.DrawImage($fullBmp, $destRect, $srcRect, [System.Drawing.GraphicsUnit]::Pixel)
             $cropBmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
         }finally{
             $gCrop.Dispose()
@@ -213,7 +216,7 @@ if($YStartPct -ge $YEndPct){throw "YStartPct 必须小于 YEndPct"}
 
 $selected = Select-Window -Title $WindowTitle
 # 截屏脚本在 powershell/ 内，上级目录才是项目根，图片统一写到 项目根/images
-$imagesDir = Join-Path $PSScriptRoot ".." "images"
+$imagesDir = Join-Path (Split-Path -Path $PSScriptRoot -Parent) "images"
 if (-not (Test-Path -LiteralPath $imagesDir)) {
     New-Item -ItemType Directory -Path $imagesDir | Out-Null
 }
@@ -223,7 +226,7 @@ if ($baseName.EndsWith(".png", [StringComparison]::OrdinalIgnoreCase)) {
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($baseName)
 }
 Write-Host ("Capturing: {0}" -f $selected.Title)
-Write-Host ("Crop config: X {0}%‑{1}% , Y {2}%‑{3}%" -f $XStartPct,$XEndPct,$YStartPct,$YEndPct)
+Write-Host ("Crop config: X {0}%-{1}% , Y {2}%-{3}%" -f $XStartPct,$XEndPct,$YStartPct,$YEndPct)
 Write-Host ("Output folder: {0}" -f $imagesDir)
 Write-Host "Press Ctrl+C to stop."
 do {
